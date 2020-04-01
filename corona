@@ -1,0 +1,125 @@
+#Obtenção dos dados do site:
+from bs4 import BeautifulSoup #distrinchar o html
+#Manipulação de dados, bases e geração de gráficos
+import pandas as pd
+import time
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+import datetime
+import unicodedata
+import json
+
+#função com oferecimento do victor
+def normalize(word):
+    new_word = unicodedata.normalize("NFD", word)
+    new_word = new_word.encode("ascii", "ignore")
+    new_word = new_word.decode("utf-8")
+    new_word = new_word.replace(' ','-')
+    new_word = new_word.lower()
+    return new_word[:-3]
+
+#função para pegar a data do dia anterior
+def getDataAnteriorDataBrasilIO():
+    dataAnterior = datetime.datetime.now()
+    dataAnterior = dataAnterior - datetime.timedelta(days=1)
+    dataAnterior = dataAnterior.strftime('%Y-%m-%d')
+    return dataAnterior
+
+#função para pegar a data do dia anterior
+def getDataAnteriorArquivoAA():
+    dataAnterior = datetime.datetime.now()
+    dataAnterior = dataAnterior - datetime.timedelta(days=2)
+    dataAnterior = dataAnterior.strftime('%d-%m-%y')
+    return dataAnterior
+
+#função para pegar a data do dia anterior
+def getDataAnterior():
+    dataAnterior = datetime.datetime.now()
+    dataAnterior = dataAnterior - datetime.timedelta(days=1)
+    dataAnterior = dataAnterior.strftime('%d/%m/%Y')
+    return dataAnterior
+
+#função para pegar a data de dois dias anteriores
+def getDataAnterior2():
+    dataAnterior = datetime.datetime.now()
+    dataAnterior = dataAnterior - datetime.timedelta(days=2)
+    dataAnterior = dataAnterior.strftime('%d/%m/%Y')
+    return dataAnterior
+
+#função para pegar a data do dia anterior
+def getDataAtualArquivo():
+    dataAtual = datetime.datetime.now()
+    dataAtual = dataAtual.strftime('%d-%m-%y')
+    return dataAtual
+    
+#função para pegar as colunas do arquivo bruto e salvar no banco de dados
+def salvarNoBancoDeDadosArquivoBruto():
+    data_atual = datetime.datetime.now()
+    data_atual = data_atual.strftime('%d-%m-%y') #pego data atual no formato do arquivo bruto
+    dataFrame = pd.read_csv("cases_brazil_cities_"+data_atual+".csv") #leio arquivo
+    #print(dataFrame)
+    #colunas banco de dados
+    idBase = []
+    dataAnterior = []
+    tipo_lugar = []
+    populacao_estimada_2019 = []
+    totalCasosSuspeitos = []
+    latitude = []
+    longitude = []
+    novosCasos = []
+    novasMortes = []
+    novosCasosSuspeitos = []
+    key = []
+    i = 0
+    estados = list(dataFrame['state']) #lista com os estados
+    for i in range(len(estados)): #for para popular as outras colunas
+        idBase.append(str('1')) #id da base de dados
+        dataAnterior.append(getDataAnterior()) #data dos dados
+        tipo_lugar.append("cidade/estado") #especificar na hora de criar a linha "estado ou cidade"
+        populacao_estimada_2019.append("none") #população estimada baseada no senso 2019
+        totalCasosSuspeitos.append("none") #casos suspeitos ainda nao encontrado fonte
+        latitude.append("none") #latitude baseada na cidade
+        longitude.append("none") #latitude baseada na cidade
+        novosCasos.append("none") #retirar a informação de novos casos subtraindo o atual do anterior no banco de dados
+        novasMortes.append("none") #retirar a informação de novas mortes subtraindo o atual do anterior no banco de dados
+        novosCasosSuspeitos.append("none") #retirar a informação de novos casos suspeitos subtraindo o atual do anterior no banco de dados
+    cidades = list(dataFrame['city']) #lista com as cidades
+    for i in range(len(cidades)):
+        key.append(normalize(cidades[i])) #normalizar o nome das cidades com algoritmo do victor
+    totalCasos = list(dataFrame['totalCases']) #total de casos até o dia
+    totalMortes = list(dataFrame['deaths']) #total de mortes até o dia
+    ibgeID = list(dataFrame['ibgeID']) #lista com o ibgeID de cada cidade
+    #salvar no dataFrame
+
+    try:
+        dfG = pd.read_csv("cases_brazil_cities.csv", sep=',', encoding="utf-8")
+        for i in range(len(estados)):
+            row = [idBase[i],dataAnterior[i],estados[i],cidades[i],key[i],tipo_lugar[i],ibgeID[i],populacao_estimada_2019[i],novosCasos[i],novasMortes[i],novosCasosSuspeitos[i],totalCasos[i],totalMortes[i],totalCasosSuspeitos[i],latitude[i],longitude[i]]  # adding a row
+            dfG.loc[len(dfG)] = row
+            dfG.to_csv("cases_brazil_cities.csv", index= False)
+        #popular novos casos e novas mortes
+        
+    except: # então é o primeiro dia e nao existe nada no banco de dados
+        dfG = pd.DataFrame(columns=['idBase','data','estado','cidade','key','tipo_lugar','ibgeID','populacao_estimada_2019','novosCasos','novasMortes','novosCasosSuspeitos','totalCasos','totalMortes','totalCasosSuspeitos','latitude','longitude']) # gera dataframe
+        dfG = pd.DataFrame({'idBase': idBase,'data': dataAnterior,'estado': estados,'cidade' : cidades,'key': key,'tipo_lugar': tipo_lugar,'ibgeID': ibgeID,'populacao_estimada_2019': populacao_estimada_2019,'novosCasos': novosCasos,'novasMortes' : novasMortes,'novosCasosSuspeitos': novosCasosSuspeitos,'totalCasos': totalCasos,'totalMortes': totalMortes,'totalCasosSuspeitos': totalCasosSuspeitos,'latitude': latitude,'longitude': longitude})
+        dfP = pd.read_csv("caso.csv", sep=',', encoding="utf-8")
+        #popular colunas faltantes com o arquivo caso.csv dataBrasilIO
+        for i in range(0,len(dfG)-1):
+            try:
+                dfG['populacao_estimada_2019'][i] = str(dfP.loc[(dfP['city_ibge_code'] == dfG['ibgeID'][i]) & (dfP['date'] == getDataAnteriorDataBrasilIO())]['estimated_population_2019'].values[0])
+            except:
+                dfG['populacao_estimada_2019'][i] = "NAO ENCONTRADO"
+        #popular as colunas latitude e longitude
+        with open('municipios.json') as json_file:
+            municipios_json = json.load(json_file)
+        for i in range(0,len(dfG) - 1):
+            for j in range(0,len(municipios_json) - 1):
+                if(municipios_json[j]['key'] == dfG['key'][i]):
+                    dfG['latitude'][i] = municipios_json[j]['latitude']
+                    dfG['longitude'][i] = municipios_json[j]['longitude']
+                    break
+    
+    dfG.to_csv("cases_brazil_cities.csv", index= False)
+   
+if __name__ == "__main__":
+    salvarNoBancoDeDadosArquivoBruto()
